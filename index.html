@@ -24,9 +24,17 @@
                 <div class="status-indicator">
                     <span id="connection-status" class="disconnected">Disconnected</span>
                 </div>
-                <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
-                    <span id="theme-icon">☀️</span>
-                </button>
+                <div class="header-buttons">
+                    <button id="install-button" class="install-button" style="display: none;">
+                        <svg width="16" height="16" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+                        </svg>
+                        Install
+                    </button>
+                    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+                        <span id="theme-icon">☀️</span>
+                    </button>
+                </div>
             </div>
         </header>
 
@@ -233,18 +241,64 @@
 
     <!-- JavaScript -->
     <script src="js/app.js"></script>
+    <script src="js/pwa-check.js"></script>
     <!-- Service Worker Registration -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./service-worker.js')
+                navigator.serviceWorker.register('/service-worker.js')
                     .then(registration => {
-                        console.log('ServiceWorker registration successful');
+                        console.log('ServiceWorker registration successful with scope:', registration.scope);
                     })
                     .catch(error => {
-                        console.log('ServiceWorker registration failed: ', error);
+                        console.error('ServiceWorker registration failed:', error);
                     });
             });
+        }
+
+        // Track installation event
+        let deferredPrompt;
+        const installButton = document.getElementById('install-button');
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            // Prevent Chrome 67 and earlier from automatically showing the prompt
+            e.preventDefault();
+            // Stash the event so it can be triggered later
+            deferredPrompt = e;
+            // Show the install button
+            installButton.style.display = 'flex';
+            console.log('Installation prompt available');
+        });
+
+        // Handle install button click
+        installButton.addEventListener('click', async () => {
+            if (!deferredPrompt) {
+                return;
+            }
+            // Show the install prompt
+            deferredPrompt.prompt();
+            // Wait for the user to respond to the prompt
+            const { outcome } = await deferredPrompt.userChoice;
+            console.log(`User response to the install prompt: ${outcome}`);
+            // We've used the prompt, and can't use it again, throw it away
+            deferredPrompt = null;
+            // Hide the install button
+            installButton.style.display = 'none';
+        });
+
+        // Track successful installation
+        window.addEventListener('appinstalled', (evt) => {
+            console.log('App was installed successfully');
+            // Hide the install button
+            installButton.style.display = 'none';
+        });
+
+        // Check if already installed
+        if (window.matchMedia('(display-mode: standalone)').matches ||
+            window.navigator.standalone ||
+            document.referrer.includes('android-app://')) {
+            console.log('App is already installed');
+            installButton.style.display = 'none';
         }
     </script>
 </body>

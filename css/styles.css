@@ -73,6 +73,36 @@ header {
   gap: 16px;
 }
 
+.header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.install-button {
+  background-color: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 6px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color 0.2s, transform 0.2s;
+}
+
+.install-button:hover {
+  background-color: var(--primary-dark);
+  transform: translateY(-2px);
+}
+
+.install-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 header h1 {
   font-size: 1.8rem;
   color: var(--primary);
