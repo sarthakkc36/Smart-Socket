@@ -1,9 +1,11 @@
-const CACHE_NAME = 'smart-socket-v2';
+const CACHE_NAME = 'smart-socket-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
+  '/offline.html',
   '/css/styles.css',
   '/js/app.js',
+  '/js/pwa-check.js',
   '/manifest.json',
   '/icons/icon-72x72.png',
   '/icons/icon-96x96.png',
@@ -51,6 +53,27 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // For navigation requests (HTML documents), use a network-first strategy
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          // Cache a copy of the response
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(event.request, responseToCache);
+          });
+          return response;
+        })
+        .catch(() => {
+          // If network fails, try to return the cached HTML
+          return caches.match('offline.html');
+        })
+    );
+    return;
+  }
+
+  // For non-navigation requests, use a cache-first strategy
   event.respondWith(
     caches.match(event.request)
       .then(response => {
