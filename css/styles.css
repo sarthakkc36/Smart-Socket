@@ -755,6 +755,187 @@ footer {
   animation: pulse 2s infinite;
 }
 
+/* Logs Section Styles */
+.logs-card {
+  margin-top: 20px;
+  overflow: hidden;
+}
+
+.logs-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-bottom: 15px;
+  gap: 10px;
+}
+
+.logs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.log-filter-btn {
+  display: flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.log-filter-btn i {
+  font-size: 16px;
+  margin-right: 4px;
+}
+
+.log-filter-btn:hover {
+  background-color: var(--hover-color);
+}
+
+.log-filter-btn.active {
+  background-color: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.logs-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.log-btn {
+  display: flex;
+  align-items: center;
+  padding: 5px 10px;
+  font-size: 0.85rem;
+}
+
+.log-btn i {
+  font-size: 16px;
+  margin-right: 4px;
+}
+
+.logs-container {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-color);
+}
+
+.logs-empty-message {
+  text-align: center;
+  padding: 20px;
+  color: var(--secondary-text);
+  font-style: italic;
+}
+
+.log-item {
+  display: flex;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  animation: fadeIn 0.3s ease;
+}
+
+.log-level-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.log-content {
+  flex: 1;
+}
+
+.log-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 5px;
+  font-size: 0.8rem;
+  color: var(--secondary-text);
+}
+
+.log-timestamp {
+  font-family: monospace;
+}
+
+.log-category {
+  display: flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.1);
+  font-size: 0.7rem;
+}
+
+.log-category i {
+  font-size: 12px;
+  margin-right: 3px;
+}
+
+.log-source {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.05);
+  font-size: 0.7rem;
+}
+
+.log-message {
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+/* Dark theme adjustments for logs */
+.dark-theme .logs-container {
+  background-color: var(--card-bg-dark);
+}
+
+.dark-theme .log-category {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark-theme .log-source {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Animation for new logs */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive styles for logs section */
+@media (max-width: 600px) {
+  .logs-controls {
+    flex-direction: column;
+  }
+  
+  .logs-filters {
+    overflow-x: auto;
+    padding-bottom: 5px;
+    margin-bottom: 10px;
+  }
+  
+  .log-category span {
+    display: none;
+  }
+}
+
 /* Responsive */
 @media (max-width: 600px) {
   .app-container {

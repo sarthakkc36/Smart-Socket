@@ -58,6 +58,9 @@ const scheduleList = document.getElementById('schedule-list');
 
 // Initialize the app
 function initApp() {
+  // Log application startup
+  logger.log('Application started', LOG_LEVELS.INFO, LOG_CATEGORIES.SYSTEM);
+
   // Populate time selectors
   populateTimeSelectors();
 
@@ -123,6 +126,10 @@ function saveSettings() {
   localStorage.setItem('mqtt_username', mqttConfig.username);
   localStorage.setItem('mqtt_password', mqttConfig.password);
 
+  // Log settings update
+  logger.log(`MQTT settings updated (broker: ${mqttConfig.broker}, port: ${mqttConfig.port})`,
+             LOG_LEVELS.INFO, LOG_CATEGORIES.MQTT);
+
   // Reconnect with new settings
   if (mqttClient && mqttClient.isConnected()) {
     mqttClient.disconnect();
@@ -135,6 +142,10 @@ function connectMQTT() {
   // Update UI
   connectionStatus.textContent = 'Connecting...';
   connectionStatus.className = 'disconnected';
+
+  // Log connection attempt
+  logger.log(`Attempting to connect to MQTT broker: ${mqttConfig.broker}:${mqttConfig.port}`,
+             LOG_LEVELS.INFO, LOG_CATEGORIES.MQTT);
 
   // Create MQTT client
   mqttClient = new Paho.MQTT.Client(
@@ -168,6 +179,9 @@ function connectMQTT() {
     console.error('MQTT connection error:', error);
     connectionStatus.textContent = 'Connection Error';
     connectionStatus.className = 'disconnected';
+
+    // Log connection error
+    logger.logMQTTEvent('error', error.message || 'Connection error');
   }
 }
 
@@ -176,6 +190,9 @@ function onConnect() {
   console.log('Connected to MQTT broker');
   connectionStatus.textContent = 'Connected';
   connectionStatus.className = 'connected';
+
+  // Log successful connection
+  logger.logMQTTEvent('connected', mqttConfig.broker);
 
   // Subscribe to all smart plugs for discovery
   mqttClient.subscribe(mqttConfig.topicBase + 'status/#');
@@ -191,6 +208,12 @@ function onConnectFailure(error) {
   console.error('Failed to connect to MQTT broker:', error);
   connectionStatus.textContent = 'Connection Failed';
   connectionStatus.className = 'disconnected';
+
+  // Log connection failure
+  logger.logMQTTEvent('error', `Failed to connect: ${error.errorMessage || 'Unknown error'}`);
+
+  // Try to reconnect after a delay
+  setTimeout(connectMQTT, 5000);
 }
 
 // On connection lost
@@ -199,6 +222,9 @@ function onConnectionLost(responseObject) {
     console.error('Connection lost:', responseObject.errorMessage);
     connectionStatus.textContent = 'Disconnected';
     connectionStatus.className = 'disconnected';
+
+    // Log disconnection
+    logger.logMQTTEvent('disconnected', responseObject.errorMessage);
 
     // Try to reconnect after a delay
     setTimeout(connectMQTT, 5000);
@@ -218,13 +244,29 @@ function onMessageArrived(message) {
       // Extract device ID from topic
       const deviceIdFromTopic = topic.replace(mqttConfig.topicBase + 'status/', '');
 
+      // Get previous state for comparison
+      const previousPowerState = deviceState.power;
+      const previousRssi = deviceState.rssi;
+
       // Update device state
       deviceState.deviceId = payload.deviceId || deviceIdFromTopic;
       deviceState.power = payload.power;
       deviceState.timer = payload.timer;
       deviceState.ip = payload.ip;
       deviceState.rssi = payload.rssi;
-      
+
+      // Log power state change if it's different and not the first update
+      if (previousPowerState !== deviceState.power && previousPowerState !== undefined) {
+        // Determine if change came from physical switch or remotely
+        const source = payload.source || 'device';
+        logger.logPowerEvent(deviceState.power, source);
+      }
+
+      // Log WiFi connection if RSSI changed significantly
+      if (previousRssi !== deviceState.rssi && Math.abs((previousRssi || 0) - deviceState.rssi) > 5) {
+        logger.logWiFiEvent(true, deviceState.rssi);
+      }
+
       // Update schedules if available in the payload
       if (payload.schedules && Array.isArray(payload.schedules)) {
         // Map device schedules to our format with IDs
@@ -235,10 +277,10 @@ function onMessageArrived(message) {
           action: schedule.action,
           enabled: schedule.enabled
         }));
-        
+
         // Save to localStorage
         saveSchedules();
-        
+
         // Update UI
         renderSchedules();
       }
@@ -248,6 +290,7 @@ function onMessageArrived(message) {
     }
   } catch (error) {
     console.error('Error processing message:', error);
+    logger.log(`Error processing MQTT message: ${error.message}`, LOG_LEVELS.ERROR, LOG_CATEGORIES.MQTT);
   }
 }
 
@@ -299,6 +342,7 @@ function updateDeviceUI() {
 function publishMessage(topic, message) {
   if (!mqttClient || !mqttClient.isConnected()) {
     console.error('MQTT client not connected');
+    logger.log('Failed to publish message: MQTT client not connected', LOG_LEVELS.ERROR, LOG_CATEGORIES.MQTT);
     return;
   }
 
@@ -309,6 +353,12 @@ function publishMessage(topic, message) {
   mqttMessage.retained = false;
 
   mqttClient.send(mqttMessage);
+
+  // Log message sent (except for routine status requests)
+  if (!(message.command === 'getStatus' && topic === mqttConfig.topicBase + 'control')) {
+    logger.log(`Published to ${topic}: ${message.command || JSON.stringify(message)}`,
+              LOG_LEVELS.INFO, LOG_CATEGORIES.MQTT);
+  }
 }
 
 // Toggle power state
@@ -320,6 +370,9 @@ function togglePower() {
     command: 'power',
     state: newState
   });
+
+  // Log power event
+  logger.logPowerEvent(newState, 'webapp');
 
   // Optimistically update UI
   deviceState.power = newState;
@@ -341,6 +394,13 @@ function saveTimer() {
     minute: minute,
     action: action
   });
+
+  // Log timer event
+  if (enabled) {
+    logger.logTimerEvent(action, hour, minute);
+  } else {
+    logger.log('Timer disabled', LOG_LEVELS.INFO, LOG_CATEGORIES.TIMER);
+  }
 
   // Optimistically update UI
   deviceState.timer.enabled = enabled;
@@ -386,6 +446,9 @@ function addSchedule() {
   saveSchedules();
   renderSchedules();
 
+  // Log schedule added
+  logger.logScheduleEvent('added', hour, minute, action);
+
   // Send to device via MQTT
   if (deviceState.deviceId && mqttClient && mqttClient.isConnected()) {
     publishMessage(mqttConfig.topicBase + 'control/' + deviceState.deviceId, {
@@ -407,19 +470,22 @@ function addSchedule() {
 function deleteSchedule(id) {
   // Find the schedule to be deleted
   const scheduleToDelete = deviceState.schedules.find(schedule => schedule.id === id);
-  
+
   if (!scheduleToDelete) {
     return; // Schedule not found
   }
-  
+
   // Get the index before removing from the array
   const scheduleIndex = deviceState.schedules.findIndex(s => s.id === id);
-  
+
+  // Log schedule removed
+  logger.logScheduleEvent('removed', scheduleToDelete.hour, scheduleToDelete.minute, scheduleToDelete.action);
+
   // Remove from local array
   deviceState.schedules = deviceState.schedules.filter(schedule => schedule.id !== id);
   saveSchedules();
   renderSchedules();
-  
+
   // Send deletion to device via MQTT if connected
   if (deviceState.deviceId && mqttClient && mqttClient.isConnected()) {
     publishMessage(mqttConfig.topicBase + 'control/' + deviceState.deviceId, {
@@ -527,6 +593,9 @@ function toggleTheme() {
   const isDark = document.body.classList.contains('dark-theme');
   localStorage.setItem('darkTheme', isDark);
   document.getElementById('theme-icon').textContent = isDark ? '🌙' : '☀️';
+
+  // Log theme change
+  logger.log(`Theme changed to ${isDark ? 'dark' : 'light'} mode`, LOG_LEVELS.INFO, LOG_CATEGORIES.SYSTEM);
 }
 
 // Initialize theme based on user preference
@@ -603,4 +672,11 @@ function updateCurrentTime() {
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   initApp();
+
+  // Initialize logs display after a short delay to ensure DOM is ready
+  setTimeout(() => {
+    if (logger && typeof logger.renderAllLogs === 'function') {
+      logger.renderAllLogs();
+    }
+  }, 500);
 });

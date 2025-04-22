@@ -15,6 +15,9 @@
     <link rel="apple-touch-icon" href="icons/icon-192x192.png">
     <link rel="shortcut icon" href="icons/icon-192x192.png">
 
+    <!-- Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
     <!-- CSS -->
     <link rel="stylesheet" href="css/styles.css">
 
@@ -105,6 +108,14 @@
                         </div>
                     </div>
 
+                    <div id="timer-status-container" class="timer-status-container">
+                        <div class="timer-status">
+                            <div id="timer-status-indicator" class="status-dot inactive"></div>
+                            <p id="timer-status-text">No timer active</p>
+                        </div>
+                        <p id="timer-remaining" class="timer-remaining"></p>
+                    </div>
+
                     <div class="timer-row">
                         <div class="time-picker">
                             <label>Time:</label>
@@ -172,6 +183,56 @@
                     <p class="placeholder-text">No schedules set</p>
                 </div>
             </section>
+
+            <!-- Logs Section -->
+            <section class="card logs-card">
+                <h2>
+                    <svg width="20" height="20" viewBox="0 0 24 24">
+                        <path fill="currentColor" d="M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M19,5V19H5V5H19Z"/>
+                        <path fill="currentColor" d="M7,7H9V9H7V7M7,11H17V13H7V11M7,15H13V17H7V15Z"/>
+                    </svg>
+                    System Logs
+                </h2>
+                <div class="logs-controls">
+                    <div class="logs-filters">
+                        <button class="log-filter-btn" data-category="power">
+                            <i class="material-icons">flash_on</i>
+                            Power
+                        </button>
+                        <button class="log-filter-btn" data-category="connection">
+                            <i class="material-icons">wifi</i>
+                            Connection
+                        </button>
+                        <button class="log-filter-btn" data-category="mqtt">
+                            <i class="material-icons">cloud</i>
+                            MQTT
+                        </button>
+                        <button class="log-filter-btn" data-category="timer">
+                            <i class="material-icons">schedule</i>
+                            Timer
+                        </button>
+                        <button class="log-filter-btn" data-category="system">
+                            <i class="material-icons">settings</i>
+                            System
+                        </button>
+                    </div>
+                    <div class="logs-actions">
+                        <button id="export-logs-btn" class="btn btn-secondary log-btn">
+                            <i class="material-icons">file_download</i>
+                            Export
+                        </button>
+                        <button id="clear-logs-btn" class="btn btn-secondary log-btn">
+                            <i class="material-icons">delete</i>
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                <div id="logs-container" class="logs-container">
+                    <p class="logs-empty-message">No logs to display</p>
+                </div>
+            </section>
+
+        </main>
 
         <footer>
             <button id="settings" class="btn btn-secondary">
@@ -245,6 +306,7 @@
     </div>
 
     <!-- JavaScript -->
+    <script src="js/logs.js"></script>
     <script src="js/app.js"></script>
     <!-- Service Worker Registration -->
     <script>
