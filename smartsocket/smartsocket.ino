@@ -13,18 +13,15 @@
 #include <time.h>          // For time functions
 
 // Pin definitions
-const int RELAY_PIN = 5;   // D1 on NodeMCU is GPIO5
-const int LED_PIN = 2;     // D4 on NodeMCU is GPIO2
+const int RELAY_PIN = 4;   // D1 on NodeMCU is GPIO5
+const int SWITCH_PIN = 14; // D5 on NodeMCU is GPIO14 - Used for switch input
 
 // Access Point settings
 const char* AP_SSID = "SmartPlug_AP";
 const char* AP_PASSWORD = "12345678";
 
-// Static IP Configuration
-IPAddress staticIP(192, 168, 1, 200);
-IPAddress gateway(192, 168, 1, 1);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress dns(8, 8, 8, 8);
+// Dynamic IP Configuration (DHCP)
+// Static IP has been removed in favor of dynamic IP assignment
 
 // DNS Server
 const byte DNS_PORT = 53;
@@ -119,6 +116,11 @@ PubSubClient mqttClient(espClient);
 // X509 certificate for TLS
 BearSSL::X509List cert(root_ca);
 
+// Add new variables at the top with other variables
+bool switchPosition = false; // Tracks the physical position of the switch
+bool ignoreSwitch = false;   // Flag to temporarily ignore switch changes
+unsigned long lastSwitchChangeTime = 0; // For debouncing
+
 void setup() {
   Serial.begin(115200);
 
@@ -127,11 +129,17 @@ void setup() {
 
   // Initialize pins
   pinMode(RELAY_PIN, OUTPUT);
-  pinMode(LED_PIN, OUTPUT);
+  pinMode(SWITCH_PIN, INPUT_PULLUP); // Switch between GPIO14 and GND
 
-  // Ensure relay and LED start in OFF state
-  digitalWrite(RELAY_PIN, LOW);
-  digitalWrite(LED_PIN, LOW);
+  // Initialize switch position variable - LOW (true) means switch is ON
+  switchPosition = (digitalRead(SWITCH_PIN) == LOW);
+  
+  // Ensure relay starts in a state matching the switch position on first boot
+  relayState = switchPosition;
+  digitalWrite(RELAY_PIN, relayState ? HIGH : LOW);
+  
+  Serial.println("Initial switch position: " + String(switchPosition ? "ON" : "OFF"));
+  Serial.println("Initial relay state: " + String(relayState ? "ON" : "OFF"));
 
   // Load WiFi credentials from EEPROM
   loadWiFiCredentials();
@@ -176,6 +184,32 @@ void setup() {
 }
 
 void loop() {
+  // Read the physical switch position (true when LOW due to pull-up resistors) 
+  bool currentSwitchPosition = (digitalRead(SWITCH_PIN) == LOW);
+  
+  // If the switch position has changed
+  if (currentSwitchPosition != switchPosition) {
+    // Debounce
+    if (millis() - lastSwitchChangeTime > 50) {
+      Serial.println("Switch position changed to: " + String(currentSwitchPosition ? "ON" : "OFF"));
+      switchPosition = currentSwitchPosition;
+      lastSwitchChangeTime = millis();
+      
+      // Only update the relay if we're not ignoring the switch
+      if (!ignoreSwitch) {
+        setRelayState(switchPosition);
+      } else {
+        // If switch position now matches relay state, stop ignoring
+        if (switchPosition == relayState) {
+          ignoreSwitch = false;
+          Serial.println("Switch position now matches relay state - no longer ignoring");
+        } else {
+          Serial.println("Switch position doesn't match relay state - ignoring switch");
+        }
+      }
+    }
+  }
+  
   if (apMode) {
     dnsServer.processNextRequest();
   } else {
@@ -412,11 +446,17 @@ void toggleRelay() {
 }
 
 void setRelayState(bool state) {
+  // Check if this state change is from something other than the physical switch
+  // and if the switch position doesn't match the new state
+  if (switchPosition != state) {
+    ignoreSwitch = true;
+    Serial.println("Switch position doesn't match desired state - ignoring switch until repositioned");
+  }
+
   relayState = state;
 
-  // Update the physical relay and LED
+  // Update the physical relay
   digitalWrite(RELAY_PIN, relayState ? HIGH : LOW);
-  digitalWrite(LED_PIN, relayState ? HIGH : LOW);
 
   // Update Blynk if connected
   if (Blynk.connected()) {
@@ -524,8 +564,7 @@ bool connectToSavedWiFi() {
 
     WiFi.mode(WIFI_STA);
 
-    // Configure static IP
-    WiFi.config(staticIP, gateway, subnet, dns);
+    // Using dynamic IP (DHCP) instead of static IP
 
     WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
 

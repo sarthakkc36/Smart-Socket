@@ -56,8 +56,504 @@ const scheduleMinuteSelect = document.getElementById('schedule-minute');
 const scheduleActionSelect = document.getElementById('schedule-action');
 const scheduleList = document.getElementById('schedule-list');
 
-// Initialize the app
+// ============ Logging System ============
+// Logger configuration
+const loggerConfig = {
+  maxEntries: 100,
+  storageKey: 'smartSocket_logs',
+  logLevel: localStorage.getItem('logLevel') || 'info' // info, warning, error, or debug
+};
+
+// Log types
+const LogType = {
+  INFO: 'info',
+  WARNING: 'warning',
+  ERROR: 'error',
+  SUCCESS: 'success'
+};
+
+// Connection tracking variables
+let connectionAttempts = 0;
+let lastDisconnectTime = null;
+let connectionHistory = [];
+
+// Logger class
+class Logger {
+  constructor(config) {
+    this.config = config;
+    this.logs = this.loadLogs();
+    this.logsElement = document.getElementById('logs-content');
+    this.setupEventListeners();
+  }
+
+  // Load logs from localStorage
+  loadLogs() {
+    const savedLogs = localStorage.getItem(this.config.storageKey);
+    return savedLogs ? JSON.parse(savedLogs) : [];
+  }
+
+  // Save logs to localStorage
+  saveLogs() {
+    // Ensure we don't exceed the maximum number of entries
+    if (this.logs.length > this.config.maxEntries) {
+      this.logs = this.logs.slice(-this.config.maxEntries);
+    }
+    localStorage.setItem(this.config.storageKey, JSON.stringify(this.logs));
+  }
+
+  // Add a new log entry
+  addLog(message, type = LogType.INFO, data = null) {
+    // Skip if log level doesn't match
+    if (type === LogType.INFO && this.config.logLevel === 'warning') return;
+    if ((type === LogType.INFO || type === LogType.WARNING) && this.config.logLevel === 'error') return;
+
+    const timestamp = new Date();
+    const logEntry = {
+      timestamp,
+      type,
+      message,
+      data
+    };
+
+    this.logs.push(logEntry);
+    this.saveLogs();
+    this.renderLog(logEntry);
+    
+    // Log to console as well
+    if (type === LogType.ERROR) {
+      console.error(message, data || '');
+    } else if (type === LogType.WARNING) {
+      console.warn(message, data || '');
+    } else {
+      console.log(message, data || '');
+    }
+  }
+
+  // Clear all logs
+  clearLogs() {
+    this.logs = [];
+    localStorage.removeItem(this.config.storageKey);
+    if (this.logsElement) {
+      this.logsElement.innerHTML = '<div class="log-entry"><span class="log-info">Logs cleared</span></div>';
+    }
+  }
+
+  // Format timestamp for display
+  formatTimestamp(date) {
+    const pad = (num) => num.toString().padStart(2, '0');
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  // Render a single log entry in the UI
+  renderLog(logEntry) {
+    if (!this.logsElement) return;
+
+    const logItem = document.createElement('div');
+    logItem.className = 'log-entry fade-in';
+
+    const timestamp = document.createElement('span');
+    timestamp.className = 'log-timestamp';
+    timestamp.textContent = this.formatTimestamp(new Date(logEntry.timestamp));
+
+    const message = document.createElement('span');
+    message.className = `log-${logEntry.type}`;
+    message.textContent = logEntry.message;
+
+    logItem.appendChild(timestamp);
+    logItem.appendChild(message);
+
+    // Add to the top of the logs
+    this.logsElement.insertBefore(logItem, this.logsElement.firstChild);
+
+    // Auto-scroll to the latest log
+    this.logsElement.scrollTop = 0;
+  }
+
+  // Export logs as text file
+  exportLogs() {
+    const logText = this.logs.map(log => {
+      const timestamp = new Date(log.timestamp);
+      const timeStr = timestamp.toISOString();
+      const levelPadded = log.type.toUpperCase().padEnd(7, ' ');
+      return `${timeStr} [${levelPadded}] ${log.message}${log.data ? ' - ' + JSON.stringify(log.data) : ''}`;
+    }).join('\n');
+
+    const blob = new Blob([logText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = `smartsocket_logs_${new Date().toISOString().replace(/[:.]/g, '_')}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  }
+
+  // Set up event listeners for log-related buttons
+  setupEventListeners() {
+    const clearBtn = document.getElementById('clear-logs');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        this.clearLogs();
+      });
+    }
+
+    const exportBtn = document.getElementById('export-logs');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        this.exportLogs();
+      });
+    }
+  }
+
+  // Render all logs in the UI
+  renderAllLogs() {
+    if (!this.logsElement) return;
+
+    this.logsElement.innerHTML = '';
+
+    if (this.logs.length === 0) {
+      const emptyMessage = document.createElement('div');
+      emptyMessage.className = 'log-entry';
+      emptyMessage.innerHTML = '<span class="log-info">No logs yet</span>';
+      this.logsElement.appendChild(emptyMessage);
+      return;
+    }
+
+    // Render logs in reverse chronological order (newest first)
+    for (let i = this.logs.length - 1; i >= 0; i--) {
+      this.renderLog(this.logs[i]);
+    }
+  }
+
+  // Calculate and return uptime statistics
+  getUptimeStats() {
+    if (connectionHistory.length === 0) {
+      return {
+        totalUptime: 0,
+        totalDowntime: 0,
+        uptimePercentage: 0,
+        avgReconnectTime: 0,
+        reconnectAttempts: connectionAttempts
+      };
+    }
+
+    let totalUptime = 0;
+    let totalDowntime = 0;
+    let reconnectTimes = [];
+
+    // Calculate times between connect/disconnect events
+    for (let i = 1; i < connectionHistory.length; i++) {
+      const prev = connectionHistory[i - 1];
+      const curr = connectionHistory[i];
+
+      if (prev.status === 'connected' && curr.status === 'disconnected') {
+        totalUptime += curr.timestamp - prev.timestamp;
+      }
+
+      if (prev.status === 'disconnected' && curr.status === 'connected') {
+        const reconnectTime = curr.timestamp - prev.timestamp;
+        totalDowntime += reconnectTime;
+        reconnectTimes.push(reconnectTime);
+      }
+    }
+
+    // If currently connected, add the time since last connect
+    const lastEvent = connectionHistory[connectionHistory.length - 1];
+    if (lastEvent.status === 'connected') {
+      totalUptime += Date.now() - lastEvent.timestamp;
+    }
+
+    // If currently disconnected, add the time since last disconnect
+    if (lastEvent.status === 'disconnected') {
+      totalDowntime += Date.now() - lastEvent.timestamp;
+    }
+
+    const totalTime = totalUptime + totalDowntime;
+    const uptimePercentage = totalTime > 0 ? (totalUptime / totalTime) * 100 : 0;
+    const avgReconnectTime = reconnectTimes.length > 0 
+      ? reconnectTimes.reduce((sum, time) => sum + time, 0) / reconnectTimes.length 
+      : 0;
+
+    return {
+      totalUptime,
+      totalDowntime,
+      uptimePercentage,
+      avgReconnectTime,
+      reconnectAttempts: connectionAttempts
+    };
+  }
+}
+
+// Global logger instance
+let logger = null;
+
+// Initialize the logger
+function initLogger() {
+  logger = new Logger(loggerConfig);
+  logger.addLog('Logging system initialized', LogType.INFO);
+  logger.renderAllLogs();
+}
+
+// Track connection state change
+function trackConnectionState(status, details = {}) {
+  const timestamp = Date.now();
+  
+  connectionHistory.push({
+    status,
+    timestamp,
+    details
+  });
+
+  // Maintain history size
+  if (connectionHistory.length > 100) {
+    connectionHistory.shift();
+  }
+
+  // Log connection state changes
+  if (status === 'connected') {
+    if (lastDisconnectTime !== null) {
+      const reconnectTime = timestamp - lastDisconnectTime;
+      const reconnectTimeFormatted = formatDuration(reconnectTime);
+      logger.addLog(`Reconnected after ${reconnectTimeFormatted}`, LogType.SUCCESS, {
+        reconnectTime,
+        attempts: connectionAttempts
+      });
+      // Reset connection attempts after successful connection
+      connectionAttempts = 0;
+    } else {
+      logger.addLog('Connected to MQTT broker', LogType.SUCCESS, details);
+    }
+    lastDisconnectTime = null;
+  } 
+  else if (status === 'disconnected') {
+    lastDisconnectTime = timestamp;
+    logger.addLog('Disconnected from MQTT broker', LogType.WARNING, details);
+  }
+  else if (status === 'connecting') {
+    connectionAttempts++;
+    logger.addLog(`Connecting to MQTT broker (attempt ${connectionAttempts})`, LogType.INFO, details);
+  }
+  else if (status === 'failed') {
+    logger.addLog('Failed to connect to MQTT broker', LogType.ERROR, details);
+  }
+}
+
+// Format milliseconds to a readable duration
+function formatDuration(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  
+  const seconds = Math.floor(ms / 1000) % 60;
+  const minutes = Math.floor(ms / (1000 * 60)) % 60;
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  
+  let result = '';
+  if (hours > 0) result += `${hours}h `;
+  if (minutes > 0 || hours > 0) result += `${minutes}m `;
+  result += `${seconds}s`;
+  
+  return result;
+}
+
+// Connection monitor - periodically logs connection stats
+function startConnectionMonitor() {
+  setInterval(() => {
+    if (mqttClient && mqttClient.isConnected()) {
+      const stats = logger.getUptimeStats();
+      
+      if (stats.reconnectAttempts > 0) {
+        logger.addLog(`Connection stats: ${stats.uptimePercentage.toFixed(1)}% uptime, avg reconnect: ${formatDuration(stats.avgReconnectTime)}`, 
+          LogType.INFO, stats);
+      }
+    }
+  }, 60000); // Log stats every minute
+}
+
+// Enhanced connection functions
+// On successful connection
+function onConnect() {
+  console.log('Connected to MQTT broker');
+  connectionStatus.textContent = 'Connected';
+  connectionStatus.className = 'connected';
+
+  // Update connection tracking
+  trackConnectionState('connected', {
+    broker: mqttConfig.broker,
+    port: mqttConfig.port
+  });
+
+  // Subscribe to all smart plugs for discovery
+  mqttClient.subscribe(mqttConfig.topicBase + 'status/#');
+
+  // Request status from all devices
+  publishMessage(mqttConfig.topicBase + 'control', {
+    command: 'getStatus'
+  });
+}
+
+// On connection failure
+function onConnectFailure(error) {
+  console.error('Failed to connect to MQTT broker:', error);
+  connectionStatus.textContent = 'Connection Failed';
+  connectionStatus.className = 'disconnected';
+
+  // Update connection tracking
+  trackConnectionState('failed', {
+    error: error.errorMessage || error.toString(),
+    broker: mqttConfig.broker,
+    port: mqttConfig.port
+  });
+
+  // Try to reconnect after a delay
+  setTimeout(connectMQTT, 5000);
+}
+
+// On connection lost
+function onConnectionLost(responseObject) {
+  if (responseObject.errorCode !== 0) {
+    console.error('Connection lost:', responseObject.errorMessage);
+    connectionStatus.textContent = 'Disconnected';
+    connectionStatus.className = 'disconnected';
+
+    // Update connection tracking
+    trackConnectionState('disconnected', {
+      error: responseObject.errorMessage,
+      errorCode: responseObject.errorCode
+    });
+
+    // Try to reconnect after a delay
+    setTimeout(connectMQTT, 5000);
+  }
+}
+
+// Connect to MQTT broker with enhanced logging
+function connectMQTT() {
+  // Update UI
+  connectionStatus.textContent = 'Connecting...';
+  connectionStatus.className = 'disconnected';
+
+  // Update connection tracking
+  trackConnectionState('connecting', {
+    broker: mqttConfig.broker,
+    port: mqttConfig.port
+  });
+
+  // Create MQTT client
+  mqttClient = new Paho.MQTT.Client(
+    mqttConfig.broker,
+    mqttConfig.port,
+    mqttConfig.clientId
+  );
+
+  // Set callback handlers
+  mqttClient.onConnectionLost = onConnectionLost;
+  mqttClient.onMessageArrived = onMessageArrived;
+
+  // Connect options
+  const options = {
+    useSSL: true,
+    timeout: 3,
+    onSuccess: onConnect,
+    onFailure: onConnectFailure
+  };
+
+  // Add credentials if provided
+  if (mqttConfig.username) {
+    options.userName = mqttConfig.username;
+    options.password = mqttConfig.password;
+  }
+
+  // Connect
+  try {
+    mqttClient.connect(options);
+  } catch (error) {
+    console.error('MQTT connection error:', error);
+    connectionStatus.textContent = 'Connection Error';
+    connectionStatus.className = 'disconnected';
+    
+    // Log error
+    trackConnectionState('failed', {
+      error: error.toString()
+    });
+  }
+}
+
+// Enhanced message handling
+function onMessageArrived(message) {
+  console.log('Message arrived:', message.destinationName, message.payloadString);
+
+  try {
+    const topic = message.destinationName;
+    const payload = JSON.parse(message.payloadString);
+
+    // Log interesting message events
+    if (topic.includes('/status/')) {
+      logger.addLog(`Received status update from device ${topic.split('/').pop()}`, 
+        LogType.INFO, { topic, rssi: payload.rssi });
+    }
+
+    // Check if this is a status message
+    if (topic.startsWith(mqttConfig.topicBase + 'status/')) {
+      // Extract device ID from topic
+      const deviceIdFromTopic = topic.replace(mqttConfig.topicBase + 'status/', '');
+
+      // Update device state
+      deviceState.deviceId = payload.deviceId || deviceIdFromTopic;
+      deviceState.power = payload.power;
+      deviceState.timer = payload.timer;
+      deviceState.ip = payload.ip;
+      deviceState.rssi = payload.rssi;
+
+      // Log low signal strength
+      if (payload.rssi < -80) {
+        logger.addLog(`Low signal strength detected: ${payload.rssi} dBm`, 
+          LogType.WARNING, { deviceId: deviceState.deviceId, rssi: payload.rssi });
+      }
+
+      // Update UI
+      updateDeviceUI();
+    }
+  } catch (error) {
+    console.error('Error processing message:', error);
+    logger.addLog('Error processing message', LogType.ERROR, { 
+      error: error.toString(), 
+      topic: message.destinationName 
+    });
+  }
+}
+
+// Enhanced publish message function with logging
+function publishMessage(topic, message) {
+  if (!mqttClient || !mqttClient.isConnected()) {
+    logger.addLog('Cannot publish message - MQTT client not connected', LogType.ERROR);
+    console.error('MQTT client not connected');
+    return;
+  }
+
+  const payload = JSON.stringify(message);
+  const mqttMessage = new Paho.MQTT.Message(payload);
+  mqttMessage.destinationName = topic;
+  mqttMessage.qos = 1;
+  mqttMessage.retained = false;
+
+  try {
+    mqttClient.send(mqttMessage);
+    logger.addLog(`Message published to ${topic}`, LogType.INFO, { command: message.command });
+  } catch (error) {
+    logger.addLog('Failed to publish message', LogType.ERROR, { 
+      error: error.toString(),
+      topic: topic
+    });
+  }
+}
+
+// Initialize the app with logging
 function initApp() {
+  // Initialize logger
+  initLogger();
+  logger.addLog('Application starting', LogType.INFO);
+
   // Populate time selectors
   populateTimeSelectors();
 
@@ -72,6 +568,9 @@ function initApp() {
 
   // Load saved schedules
   loadSchedules();
+  
+  // Start connection monitor
+  startConnectionMonitor();
 }
 
 // Populate hour and minute selectors
@@ -130,187 +629,6 @@ function saveSettings() {
   connectMQTT();
 }
 
-// Connect to MQTT broker
-function connectMQTT() {
-  // Update UI
-  connectionStatus.textContent = 'Connecting...';
-  connectionStatus.className = 'disconnected';
-
-  // Create MQTT client
-  mqttClient = new Paho.MQTT.Client(
-    mqttConfig.broker,
-    mqttConfig.port,
-    mqttConfig.clientId
-  );
-
-  // Set callback handlers
-  mqttClient.onConnectionLost = onConnectionLost;
-  mqttClient.onMessageArrived = onMessageArrived;
-
-  // Connect options
-  const options = {
-    useSSL: true,
-    timeout: 3,
-    onSuccess: onConnect,
-    onFailure: onConnectFailure
-  };
-
-  // Add credentials if provided
-  if (mqttConfig.username) {
-    options.userName = mqttConfig.username;
-    options.password = mqttConfig.password;
-  }
-
-  // Connect
-  try {
-    mqttClient.connect(options);
-  } catch (error) {
-    console.error('MQTT connection error:', error);
-    connectionStatus.textContent = 'Connection Error';
-    connectionStatus.className = 'disconnected';
-  }
-}
-
-// On successful connection
-function onConnect() {
-  console.log('Connected to MQTT broker');
-  connectionStatus.textContent = 'Connected';
-  connectionStatus.className = 'connected';
-
-  // Subscribe to all smart plugs for discovery
-  mqttClient.subscribe(mqttConfig.topicBase + 'status/#');
-
-  // Request status from all devices
-  publishMessage(mqttConfig.topicBase + 'control', {
-    command: 'getStatus'
-  });
-}
-
-// On connection failure
-function onConnectFailure(error) {
-  console.error('Failed to connect to MQTT broker:', error);
-  connectionStatus.textContent = 'Connection Failed';
-  connectionStatus.className = 'disconnected';
-}
-
-// On connection lost
-function onConnectionLost(responseObject) {
-  if (responseObject.errorCode !== 0) {
-    console.error('Connection lost:', responseObject.errorMessage);
-    connectionStatus.textContent = 'Disconnected';
-    connectionStatus.className = 'disconnected';
-
-    // Try to reconnect after a delay
-    setTimeout(connectMQTT, 5000);
-  }
-}
-
-// On message received
-function onMessageArrived(message) {
-  console.log('Message arrived:', message.destinationName, message.payloadString);
-
-  try {
-    const topic = message.destinationName;
-    const payload = JSON.parse(message.payloadString);
-
-    // Check if this is a status message
-    if (topic.startsWith(mqttConfig.topicBase + 'status/')) {
-      // Extract device ID from topic
-      const deviceIdFromTopic = topic.replace(mqttConfig.topicBase + 'status/', '');
-
-      // Update device state
-      deviceState.deviceId = payload.deviceId || deviceIdFromTopic;
-      deviceState.power = payload.power;
-      deviceState.timer = payload.timer;
-      deviceState.ip = payload.ip;
-      deviceState.rssi = payload.rssi;
-
-      // Update UI
-      updateDeviceUI();
-    }
-  } catch (error) {
-    console.error('Error processing message:', error);
-  }
-}
-
-// Update device UI with current state
-function updateDeviceUI() {
-  // Device info
-  deviceId.textContent = deviceState.deviceId;
-  deviceIp.textContent = 'IP: ' + deviceState.ip;
-  signalStrength.textContent = 'Signal: ' + deviceState.rssi + ' dBm';
-
-  // Power state
-  powerToggle.checked = deviceState.power;
-  powerLabel.textContent = deviceState.power ? 'ON' : 'OFF';
-
-  // Timer state
-  timerToggle.checked = deviceState.timer.enabled;
-  timerHourSelect.value = deviceState.timer.hour;
-  timerMinuteSelect.value = deviceState.timer.minute;
-  timerActionSelect.value = deviceState.timer.action ? 'on' : 'off';
-
-  // Enable/disable timer controls based on timer state
-  timerHourSelect.disabled = !deviceState.timer.enabled;
-  timerMinuteSelect.disabled = !deviceState.timer.enabled;
-  timerActionSelect.disabled = !deviceState.timer.enabled;
-}
-
-// Publish message to MQTT broker
-function publishMessage(topic, message) {
-  if (!mqttClient || !mqttClient.isConnected()) {
-    console.error('MQTT client not connected');
-    return;
-  }
-
-  const payload = JSON.stringify(message);
-  const mqttMessage = new Paho.MQTT.Message(payload);
-  mqttMessage.destinationName = topic;
-  mqttMessage.qos = 1;
-  mqttMessage.retained = false;
-
-  mqttClient.send(mqttMessage);
-}
-
-// Toggle power state
-function togglePower() {
-  const newState = !deviceState.power;
-
-  // Publish power command
-  publishMessage(mqttConfig.topicBase + 'control/' + deviceState.deviceId, {
-    command: 'power',
-    state: newState
-  });
-
-  // Optimistically update UI
-  deviceState.power = newState;
-  updateDeviceUI();
-}
-
-// Save timer settings
-function saveTimer() {
-  const enabled = timerToggle.checked;
-  const hour = parseInt(timerHourSelect.value);
-  const minute = parseInt(timerMinuteSelect.value);
-  const action = timerActionSelect.value === 'on';
-
-  // Publish timer command
-  publishMessage(mqttConfig.topicBase + 'control/' + deviceState.deviceId, {
-    command: 'timer',
-    enabled: enabled,
-    hour: hour,
-    minute: minute,
-    action: action
-  });
-
-  // Optimistically update UI
-  deviceState.timer.enabled = enabled;
-  deviceState.timer.hour = hour;
-  deviceState.timer.minute = minute;
-  deviceState.timer.action = action;
-  updateDeviceUI();
-}
-
 // Load schedules from localStorage
 function loadSchedules() {
   const savedSchedules = localStorage.getItem('schedules');
@@ -360,7 +678,7 @@ function deleteSchedule(id) {
   renderSchedules();
 }
 
-// Render schedules list
+// Enhanced version of renderSchedules
 function renderSchedules() {
   scheduleList.innerHTML = '';
 
@@ -385,11 +703,17 @@ function renderSchedules() {
     const scheduleItem = document.createElement('div');
     scheduleItem.className = 'schedule-item';
 
-    const timeText = document.createElement('span');
+    const timeText = document.createElement('div');
     timeText.className = 'schedule-time';
-    timeText.textContent = `${schedule.hour.toString().padStart(2, '0')}:${schedule.minute.toString().padStart(2, '0')}`;
+    timeText.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M12,2C6.477,2,2,6.477,2,12c0,5.523,4.477,10,10,10s10-4.477,10-10C22,6.477,17.523,2,12,2z M12,20c-4.418,0-8-3.582-8-8s3.582-8,8-8s8,3.582,8,8S16.418,20,12,20z"/>
+        <path fill="currentColor" d="M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"/>
+      </svg>
+      ${schedule.hour.toString().padStart(2, '0')}:${schedule.minute.toString().padStart(2, '0')}
+    `;
 
-    const actionText = document.createElement('span');
+    const actionText = document.createElement('div');
     actionText.className = `schedule-action ${schedule.action ? 'action-on' : 'action-off'}`;
     actionText.textContent = schedule.action ? 'ON' : 'OFF';
 
@@ -406,47 +730,44 @@ function renderSchedules() {
   });
 }
 
-// Set up event listeners
+// Enhanced setup event listeners
 function setupEventListeners() {
-  // Power toggle
+  // Original event listeners
   powerToggle.addEventListener('change', togglePower);
 
-  // Timer toggle
   timerToggle.addEventListener('change', () => {
     timerHourSelect.disabled = !timerToggle.checked;
     timerMinuteSelect.disabled = !timerToggle.checked;
     timerActionSelect.disabled = !timerToggle.checked;
   });
 
-  // Save timer button
   saveTimerBtn.addEventListener('click', saveTimer);
 
-  // Settings button
   settingsBtn.addEventListener('click', () => {
     settingsModal.style.display = 'block';
   });
 
-  // Close settings button
-  closeSettingsBtn.addEventListener('click', () => {
+  // Update close button selector
+  document.querySelector('.close-button').addEventListener('click', () => {
     settingsModal.style.display = 'none';
   });
 
-  // Settings form
   settingsForm.addEventListener('submit', (e) => {
     e.preventDefault();
     saveSettings();
     settingsModal.style.display = 'none';
   });
 
-  // Add schedule button
   addScheduleBtn.addEventListener('click', addSchedule);
 
-  // Close modal when clicking outside
   window.addEventListener('click', (e) => {
     if (e.target === settingsModal) {
       settingsModal.style.display = 'none';
     }
   });
+
+  // Set up time update interval
+  setInterval(updateCurrentTime, 1000);
 }
 
 // Theme toggle function
@@ -569,98 +890,6 @@ function updateDeviceUI() {
 
   // Update current time
   updateCurrentTime();
-}
-
-// Enhanced version of renderSchedules
-function renderSchedules() {
-  scheduleList.innerHTML = '';
-
-  if (deviceState.schedules.length === 0) {
-    const emptyMessage = document.createElement('p');
-    emptyMessage.className = 'placeholder-text';
-    emptyMessage.textContent = 'No schedules set';
-    scheduleList.appendChild(emptyMessage);
-    return;
-  }
-
-  // Sort schedules by time
-  deviceState.schedules.sort((a, b) => {
-    if (a.hour !== b.hour) {
-      return a.hour - b.hour;
-    }
-    return a.minute - b.minute;
-  });
-
-  // Create schedule items
-  deviceState.schedules.forEach(schedule => {
-    const scheduleItem = document.createElement('div');
-    scheduleItem.className = 'schedule-item';
-
-    const timeText = document.createElement('div');
-    timeText.className = 'schedule-time';
-    timeText.innerHTML = `
-      <svg width="16" height="16" viewBox="0 0 24 24">
-        <path fill="currentColor" d="M12,2C6.477,2,2,6.477,2,12c0,5.523,4.477,10,10,10s10-4.477,10-10C22,6.477,17.523,2,12,2z M12,20c-4.418,0-8-3.582-8-8s3.582-8,8-8s8,3.582,8,8S16.418,20,12,20z"/>
-        <path fill="currentColor" d="M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"/>
-      </svg>
-      ${schedule.hour.toString().padStart(2, '0')}:${schedule.minute.toString().padStart(2, '0')}
-    `;
-
-    const actionText = document.createElement('div');
-    actionText.className = `schedule-action ${schedule.action ? 'action-on' : 'action-off'}`;
-    actionText.textContent = schedule.action ? 'ON' : 'OFF';
-
-    const deleteButton = document.createElement('button');
-    deleteButton.className = 'delete-btn';
-    deleteButton.innerHTML = '&times;';
-    deleteButton.addEventListener('click', () => deleteSchedule(schedule.id));
-
-    scheduleItem.appendChild(timeText);
-    scheduleItem.appendChild(actionText);
-    scheduleItem.appendChild(deleteButton);
-
-    scheduleList.appendChild(scheduleItem);
-  });
-}
-
-// Enhanced setup event listeners
-function setupEventListeners() {
-  // Original event listeners
-  powerToggle.addEventListener('change', togglePower);
-
-  timerToggle.addEventListener('change', () => {
-    timerHourSelect.disabled = !timerToggle.checked;
-    timerMinuteSelect.disabled = !timerToggle.checked;
-    timerActionSelect.disabled = !timerToggle.checked;
-  });
-
-  saveTimerBtn.addEventListener('click', saveTimer);
-
-  settingsBtn.addEventListener('click', () => {
-    settingsModal.style.display = 'block';
-  });
-
-  // Update close button selector
-  document.querySelector('.close-button').addEventListener('click', () => {
-    settingsModal.style.display = 'none';
-  });
-
-  settingsForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    saveSettings();
-    settingsModal.style.display = 'none';
-  });
-
-  addScheduleBtn.addEventListener('click', addSchedule);
-
-  window.addEventListener('click', (e) => {
-    if (e.target === settingsModal) {
-      settingsModal.style.display = 'none';
-    }
-  });
-
-  // Set up time update interval
-  setInterval(updateCurrentTime, 1000);
 }
 
 // Initialize app when DOM is loaded

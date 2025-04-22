@@ -726,6 +726,89 @@ footer {
   padding: 24px;
 }
 
+/* Logs Section Styles */
+.log-card {
+    margin-top: 20px;
+}
+
+.logs-container {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin-top: 10px;
+    background-color: var(--bg-secondary);
+}
+
+.logs-content {
+    padding: 10px;
+    font-family: monospace;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.log-entry {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+    word-break: break-word;
+}
+
+.log-timestamp {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-right: 8px;
+}
+
+.log-info {
+    color: var(--text-color);
+}
+
+.log-warning {
+    color: #ff9800;
+}
+
+.log-error {
+    color: #f44336;
+}
+
+.log-success {
+    color: #4caf50;
+}
+
+.small-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    margin-left: 8px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-color);
+}
+
+.small-btn:hover {
+    background-color: var(--bg-hover);
+}
+
+.dark-theme .log-info {
+    color: #e0e0e0;
+}
+
+.dark-theme .log-warning {
+    color: #ffb74d;
+}
+
+.dark-theme .log-error {
+    color: #ef5350;
+}
+
+.dark-theme .log-success {
+    color: #81c784;
+}
+
 /* Animations */
 @keyframes fadeIn {
   from { opacity: 0; }
